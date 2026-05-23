@@ -1,8 +1,9 @@
 # =============================================================================
-# app.py — Streamlit Frontend for Plant Disease Detection System
+# app.py — Plant Disease Detection System (Single-Process Streamlit App)
 # =============================================================================
 # Run with:  streamlit run app.py
-# Make sure the FastAPI backend (api.py) is already running on port 8000.
+# The TensorFlow/Keras model is loaded directly in-process — no separate
+# backend server required.
 # =============================================================================
 
 import io
@@ -417,7 +418,7 @@ def call_predict_api(image_bytes: bytes, filename: str = "image.jpg"):
         if model is None:
             return None, "❌ Model is not loaded. Place the model file in the directory."
 
-        # Preprocess (matches the training/FastAPI pipeline exactly)
+        # Preprocess: resize to 128×128 and normalise to match the training pipeline
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         image = image.resize((128, 128))
         input_arr = tf.keras.preprocessing.image.img_to_array(image)   # shape: (128,128,3)
@@ -1113,12 +1114,12 @@ def page_about():
         """
         | Property | Detail |
         |---|---|
-        | **Framework** | TensorFlow 2.10 / Keras |
+        | **Framework** | TensorFlow / Keras |
         | **Architecture** | Convolutional Neural Network (CNN) |
         | **Input Shape** | (128, 128, 3) — RGB |
         | **Output** | Softmax over 38 classes |
         | **Training Dataset** | PlantVillage (augmented) |
-        | **Deployment** | FastAPI backend + Streamlit frontend |
+        | **Deployment** | Single-process Streamlit app (in-process inference) |
         | **Inference Latency** | < 200 ms per image (CPU) |
         """
     )
@@ -1191,7 +1192,7 @@ def page_about():
     st.markdown(
         """
         <div style="text-align:center;color:#30363D;font-size:0.8rem;padding:1rem 0;">
-            🌿 Plant Disease Detection System &nbsp;·&nbsp; Powered by TensorFlow + FastAPI + Streamlit
+            🌿 Plant Disease Detection System &nbsp;·&nbsp; Powered by TensorFlow + Streamlit
         </div>
         """,
         unsafe_allow_html=True,
