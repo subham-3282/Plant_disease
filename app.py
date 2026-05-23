@@ -6,9 +6,12 @@
 # =============================================================================
 
 import io
+import os
 import requests
 from PIL import Image
+import numpy as np
 import streamlit as st
+import tensorflow as tf
 
 # ---------------------------------------------------------------------------
 # PAGE CONFIG  (must be the very first Streamlit call)
@@ -21,9 +24,76 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# GLOBAL CONSTANTS
+# GLOBAL CONSTANTS & MODEL LOADING
 # ---------------------------------------------------------------------------
-API_URL = "http://127.0.0.1:8000/predict"
+
+# Raw class names matching the model's output classes (used for get_advice)
+RAW_CLASS_NAMES = {
+    0:  "Apple___Apple_scab",
+    1:  "Apple___Black_rot",
+    2:  "Apple___Cedar_apple_rust",
+    3:  "Apple___healthy",
+    4:  "Blueberry___healthy",
+    5:  "Cherry_(including_sour)___Powdery_mildew",
+    6:  "Cherry_(including_sour)___healthy",
+    7:  "Corn_(maize)___Cercospora_leaf_spot Gray_leaf_spot",
+    8:  "Corn_(maize)___Common_rust_",
+    9:  "Corn_(maize)___Northern_Leaf_Blight",
+    10: "Corn_(maize)___healthy",
+    11: "Grape___Black_rot",
+    12: "Grape___Esca_(Black_Measles)",
+    13: "Grape___Leaf_blight_(Isariopsis_Leaf_Spot)",
+    14: "Grape___healthy",
+    15: "Orange___Haunglongbing_(Citrus_greening)",
+    16: "Peach___Bacterial_spot",
+    17: "Peach___healthy",
+    18: "Pepper,_bell___Bacterial_spot",
+    19: "Pepper,_bell___healthy",
+    20: "Potato___Early_blight",
+    21: "Potato___Late_blight",
+    22: "Potato___healthy",
+    23: "Raspberry___healthy",
+    24: "Soybean___healthy",
+    25: "Squash___Powdery_mildew",
+    26: "Strawberry___Leaf_scorch",
+    27: "Strawberry___healthy",
+    28: "Tomato___Bacterial_spot",
+    29: "Tomato___Early_blight",
+    30: "Tomato___Late_blight",
+    31: "Tomato___Leaf_Mold",
+    32: "Tomato___Septoria_leaf_spot",
+    33: "Tomato___Spider_mites Two-spotted_spider_mite",
+    34: "Tomato___Target_Spot",
+    35: "Tomato___Tomato_Yellow_Leaf_Curl_Virus",
+    36: "Tomato___Tomato_mosaic_virus",
+    37: "Tomato___healthy",
+}
+
+@st.cache_resource
+def load_prediction_model():
+    """Loads and caches the TensorFlow/Keras model."""
+    import os
+    BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+    KERAS_PATH = os.path.join(BASE_DIR, "Plant_disease_model.keras")
+    H5_PATH    = os.path.join(BASE_DIR, "Plant_disease_model.h5")
+
+    paths_to_try = []
+    if os.path.exists(H5_PATH):
+        paths_to_try.append(H5_PATH)
+    if os.path.exists(KERAS_PATH):
+        paths_to_try.append(KERAS_PATH)
+
+    if not paths_to_try:
+        return None, "No model file found. Place 'Plant_disease_model.keras' or 'Plant_disease_model.h5' in the same directory as app.py."
+
+    errors = []
+    for path in paths_to_try:
+        try:
+            model = tf.keras.models.load_model(path)
+            return model, None
+        except Exception as exc:
+            errors.append(f"Failed to load from {os.path.basename(path)}: {str(exc)}")
+    return None, " | ".join(errors)
 
 # All 38 class names (mirrors the backend dict — used for the About page)
 CLASS_NAMES = [
@@ -336,27 +406,37 @@ def fetch_image_from_url(url: str):
 
 
 # ---------------------------------------------------------------------------
-# HELPER — call the FastAPI backend
+# HELPER — run model prediction locally
 # ---------------------------------------------------------------------------
 def call_predict_api(image_bytes: bytes, filename: str = "image.jpg"):
-    """Posts image bytes to the /predict endpoint and returns the JSON payload."""
+    """Predicts the disease class directly in the Streamlit app using the loaded model."""
     try:
-        response = requests.post(
-            API_URL,
-            files   = {"file": (filename, image_bytes, "image/jpeg")},
-            timeout = 30,
-        )
-        response.raise_for_status()
-        return response.json(), None
-    except requests.exceptions.ConnectionError:
-        return None, (
-            "❌ Cannot connect to the backend API. "
-            "Please start it with:  `uvicorn api:app --port 8000`"
-        )
-    except requests.exceptions.Timeout:
-        return None, "❌ The backend took too long to respond. Try again."
+        model, err = load_prediction_model()
+        if err:
+            return None, f"❌ Model Loading Error: {err}"
+        if model is None:
+            return None, "❌ Model is not loaded. Place the model file in the directory."
+
+        # Preprocess (matches the training/FastAPI pipeline exactly)
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image = image.resize((128, 128))
+        input_arr = tf.keras.preprocessing.image.img_to_array(image)   # shape: (128,128,3)
+        input_arr = np.array([input_arr])                               # shape: (1,128,128,3)
+
+        # Inference
+        prediction = model.predict(input_arr)
+        result_index = int(np.argmax(prediction))
+        confidence = float(np.max(prediction)) * 100
+
+        class_name = RAW_CLASS_NAMES.get(result_index, "Unknown")
+
+        return {
+            "result_index": result_index,
+            "class_name": class_name,
+            "confidence": f"{confidence:.2f}%",
+        }, None
     except Exception as exc:
-        return None, f"❌ Unexpected error: {exc}"
+        return None, f"❌ Unexpected error during local inference: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -1145,25 +1225,34 @@ def sidebar_nav():
         st.markdown(
             """
             <div style="font-size:0.78rem;color:#8B949E;padding:0.5rem 0;">
-                <strong style="color:#66BB6A;">Backend Status</strong><br>
-                Make sure the FastAPI server is running:<br>
-                <code style="color:#A5D6A7;">uvicorn api:app --port 8000</code>
+                <strong style="color:#66BB6A;">Model Status</strong><br>
+                Model runs directly inside the Streamlit app.
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        # Quick API health check
+        # Quick Model health check
         try:
-            r = requests.get("http://127.0.0.1:8000/", timeout=2)
-            if r.status_code == 200:
+            model, err = load_prediction_model()
+            if err:
                 st.markdown(
-                    '<div style="color:#69F0AE;font-size:0.82rem;">🟢 API Online</div>',
+                    f'<div style="color:#FF6B6B;font-size:0.82rem;">🔴 Load Error: {err[:30]}...</div>',
                     unsafe_allow_html=True,
                 )
-        except Exception:
+            elif model is not None:
+                st.markdown(
+                    '<div style="color:#69F0AE;font-size:0.82rem;">🟢 Model Ready</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    '<div style="color:#FF6B6B;font-size:0.82rem;">🔴 Model Not Found</div>',
+                    unsafe_allow_html=True,
+                )
+        except Exception as e:
             st.markdown(
-                '<div style="color:#FF6B6B;font-size:0.82rem;">🔴 API Offline</div>',
+                f'<div style="color:#FF6B6B;font-size:0.82rem;">🔴 Error: {str(e)[:30]}...</div>',
                 unsafe_allow_html=True,
             )
 
