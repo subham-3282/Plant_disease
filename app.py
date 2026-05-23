@@ -969,7 +969,7 @@ def page_recognition():
 
         with col_preview:
             st.markdown('<div class="image-card">', unsafe_allow_html=True)
-            st.image(pil_image, caption="📷 Loaded Image", use_container_width=True)
+            st.image(pil_image, caption="📷 Loaded Image", width="stretch")
             st.markdown("</div>", unsafe_allow_html=True)
 
         with col_info:
@@ -994,7 +994,7 @@ def page_recognition():
 
             # ── Analyse button ─────────────────────────────────────────────
             st.markdown("<br>", unsafe_allow_html=True)
-            analyse = st.button("🧠 Analyse Image", use_container_width=True)
+            analyse = st.button("🧠 Analyse Image", width="stretch")
 
         # ── Run inference ──────────────────────────────────────────────────
         if analyse:
